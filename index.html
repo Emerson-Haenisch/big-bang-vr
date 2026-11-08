@@ -30,8 +30,8 @@
 <div id="ui">
   <div id="vrslot"></div>
   <div class="row"><button class="btn ghost" id="prev">◀ Voltar</button><button class="btn" id="next">Próximo ▶</button></div>
-  <div class="row"><button class="btn fly" id="go">🚀 Chegar perto</button><button class="btn ghost sm" id="zin">➕</button><button class="btn ghost sm" id="zout">➖</button><button class="btn ghost sm" id="home">⟲</button></div>
-  <div id="hint"><b>Arraste</b> para olhar · <b>roda do mouse</b>, <b>W/S</b> ou <b>↑/↓</b> para ir para frente e para trás · <b>A/D</b> para os lados · <b>Q/E</b> sobe/desce · <b>N/B</b> troca de parte.<br>No óculos: <b>gatilho</b> avança, <b>grip</b> volta, <b>analógico esquerdo</b> voa, <b>analógico direito</b> gira e sobe/desce, botão <b>A</b> chega perto.</div>
+  <div class="row"><button class="btn fly" id="go">🚀 Chegar perto</button><button class="btn ghost sm" id="zin">➕</button><button class="btn ghost sm" id="zout">➖</button><button class="btn ghost sm" id="home">⟲</button><button class="btn ghost sm" id="snd">🔊</button></div>
+  <div id="hint"><b>Arraste</b> para olhar · <b>roda do mouse</b>, <b>W/S</b> ou <b>↑/↓</b> para ir para frente e para trás · <b>A/D</b> para os lados · <b>Q/E</b> sobe/desce · <b>N/B</b> troca de parte.<br>Toque na tela para ligar o <b>narrador</b> 🔊.<br>No óculos: <b>gatilho</b> avança, <b>grip</b> volta, <b>analógico esquerdo</b> voa, <b>analógico direito</b> gira e sobe/desce, botão <b>A</b> chega perto.</div>
 </div>
 <script type="module">
 import * as THREE from 'three';
@@ -248,7 +248,7 @@ const bum=textSprite('💥 BUM!','#ffcf5a',1.6); bum.position.copy(ORIGIN).add(n
 // ---------- stage logic ----------
 let stage=0, stageT=0;
 const clock=new THREE.Clock();
-function go(n){ stage=(n+STAGES.length)%STAGES.length; stageT=0; drawPanel(stage); }
+function go(n){ const prev=stage; stage=(n+STAGES.length)%STAGES.length; stageT=0; drawPanel(stage); if(prev!==stage){ narrate(stage); fx(stage); } }
 document.getElementById('next').onclick=()=>go(stage+1);
 document.getElementById('prev').onclick=()=>go(Math.max(0,stage-1));
 for(let i=0;i<2;i++){
@@ -280,6 +280,79 @@ function flyToFocus(){ const [p,d]=focusOf(stage); flyTo(p,d); }
 document.getElementById('go').onclick=flyToFocus;
 document.getElementById('home').onclick=goHome;
 let snapCD=0, aWas=false;
+
+// ---------- narration + cinematic sound ----------
+const NARR = [
+  "No início... não existia nada do que conhecemos. Apenas um ponto. Minúsculo. Infinitamente quente. E, dentro dele... tudo o que um dia iria existir.",
+  "E então... tudo começou. O espaço se expandiu em todas as direções, como um balão gigante. E você... está dentro dele.",
+  "O universo cresceu... e esfriou. Pequenas partículas se uniram, formando os primeiros átomos. Os tijolos de tudo o que existe.",
+  "Milhões de anos se passaram. A gravidade reuniu nuvens de gás... até que, pela primeira vez... uma estrela se acendeu.",
+  "Bilhões de estrelas se uniram em redemoinhos gigantes. Nasciam as galáxias. E entre elas... a nossa. A Via Láctea.",
+  "Há quatro bilhões e seiscentos milhões de anos, num canto tranquilo da galáxia... nasceu o Sol. E, ao seu redor... um pequeno planeta azul. A Terra.",
+  "E aqui está você. Feita da poeira das estrelas. E o universo... continua crescendo.",
+  "Mas... o que existia antes? Ninguém sabe. Talvez dois universos tenham se tocado... Talvez... você descubra a resposta."
+];
+let AC=null, master=null, soundOn=true, unlocked=false, voice=null;
+const MALE=/(male|mascul|daniel|ricardo|ant[oô]nio|felipe|thiago|f[aá]bio|duarte|cristiano|humberto|donato|j[uú]lio|nicolau|val[eé]rio|bruno|paulo|marcos|rafael|eduardo)/i;
+function pickVoice(){
+  if(!('speechSynthesis' in window)) return;
+  const vs=speechSynthesis.getVoices().filter(v=>/^pt/i.test(v.lang));
+  voice = vs.find(v=>/br/i.test(v.lang)&&MALE.test(v.name)) || vs.find(v=>MALE.test(v.name)) || vs.find(v=>/br/i.test(v.lang)) || vs[0] || null;
+}
+if('speechSynthesis' in window){ pickVoice(); speechSynthesis.onvoiceschanged=pickVoice; }
+function narrate(i){
+  if(!soundOn || !unlocked || !('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(NARR[i]);
+  if(voice) u.voice=voice; u.lang=voice?voice.lang:'pt-BR';
+  u.pitch=0.45; u.rate=0.82; u.volume=1;      // deep, slow, movie-trailer style
+  duck(true); u.onend=()=>duck(false); u.onerror=()=>duck(false);
+  setTimeout(()=>speechSynthesis.speak(u),350);
+}
+function initAudio(){
+  if(AC) return;
+  AC=new (window.AudioContext||window.webkitAudioContext)();
+  master=AC.createGain(); master.gain.value=0;
+  // big "cinema hall" reverb
+  const len=AC.sampleRate*4, ir=AC.createBuffer(2,len,AC.sampleRate);
+  for(let c=0;c<2;c++){ const d=ir.getChannelData(c); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3); }
+  const rev=AC.createConvolver(); rev.buffer=ir; const wet=AC.createGain(); wet.gain.value=0.55;
+  master.connect(AC.destination); master.connect(rev); rev.connect(wet); wet.connect(AC.destination);
+  // deep space drone spread left/right around the listener
+  const lp=AC.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=380; lp.connect(master);
+  [[55,-0.9,.11],[55.35,0.9,.11],[82.4,-0.5,.06],[110.2,0.5,.05],[164.8,0,.03]].forEach(([f,p,v])=>{
+    const o=AC.createOscillator(); o.type=f<100?'sawtooth':'triangle'; o.frequency.value=f;
+    const g=AC.createGain(); g.gain.value=v; const pn=AC.createStereoPanner(); pn.pan.value=p;
+    o.connect(g).connect(pn).connect(lp); o.start(); });
+  const lfo=AC.createOscillator(); lfo.frequency.value=0.06; const lg=AC.createGain(); lg.gain.value=220;
+  lfo.connect(lg).connect(lp.frequency); lfo.start();
+  master.gain.linearRampToValueAtTime(0.5, AC.currentTime+3);
+}
+function duck(on){ if(!AC) return; const g=master.gain, t=AC.currentTime; g.cancelScheduledValues(t); g.setValueAtTime(g.value,t); g.linearRampToValueAtTime(soundOn?(on?0.2:0.5):0, t+0.6); }
+function boom(){
+  if(!AC||!soundOn) return; const t=AC.currentTime;
+  const o=AC.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(95,t); o.frequency.exponentialRampToValueAtTime(26,t+2.8);
+  const g=AC.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(1.0,t+0.04); g.gain.exponentialRampToValueAtTime(0.0001,t+3.2);
+  o.connect(g).connect(master); o.start(t); o.stop(t+3.3);
+  const b=AC.createBuffer(2,AC.sampleRate*2.5,AC.sampleRate);
+  for(let c=0;c<2;c++){ const d=b.getChannelData(c); for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2.2); }
+  const n=AC.createBufferSource(); n.buffer=b; const nf=AC.createBiquadFilter(); nf.type='lowpass'; nf.frequency.value=700;
+  const ng=AC.createGain(); ng.gain.value=0.6; n.connect(nf).connect(ng).connect(master); n.start(t);
+}
+let boomTimer=null;
+function fx(i){ clearTimeout(boomTimer); if(i===1) boom(); if(i===7) boomTimer=setTimeout(boom,2500); }
+function unlock(){
+  initAudio(); if(AC.state==='suspended') AC.resume();
+  if(!unlocked){ unlocked=true; narrate(stage); }
+}
+addEventListener('pointerdown',unlock); addEventListener('keydown',unlock);
+const sndBtn=document.getElementById('snd');
+sndBtn.addEventListener('click',()=>{
+  soundOn=!soundOn; sndBtn.textContent=soundOn?'🔊':'🔇';
+  if(!soundOn){ if('speechSynthesis' in window) speechSynthesis.cancel(); duck(false); }
+  else { unlock(); duck(false); narrate(stage); }
+});
+
 
 const ease=x=>1-Math.pow(1-Math.min(Math.max(x,0),1),3);
 const hot=new THREE.Color(0xfff2c0), warm=new THREE.Color(0xff8a3c), cool=new THREE.Color(0x8fa8ff);
