@@ -283,14 +283,14 @@ let snapCD=0, aWas=false;
 
 // ---------- narration + cinematic sound ----------
 const NARR = [
-  "No início... não existia nada do que conhecemos. Apenas um ponto. Minúsculo. Infinitamente quente. E, dentro dele... tudo o que um dia iria existir.",
-  "E então... tudo começou. O espaço se expandiu em todas as direções, como um balão gigante. E você... está dentro dele.",
-  "O universo cresceu... e esfriou. Pequenas partículas se uniram, formando os primeiros átomos. Os tijolos de tudo o que existe.",
-  "Milhões de anos se passaram. A gravidade reuniu nuvens de gás... até que, pela primeira vez... uma estrela se acendeu.",
-  "Bilhões de estrelas se uniram em redemoinhos gigantes. Nasciam as galáxias. E entre elas... a nossa. A Via Láctea.",
-  "Há quatro bilhões e seiscentos milhões de anos, num canto tranquilo da galáxia... nasceu o Sol. E, ao seu redor... um pequeno planeta azul. A Terra.",
-  "E aqui está você. Feita da poeira das estrelas. E o universo... continua crescendo.",
-  "Mas... o que existia antes? Ninguém sabe. Talvez dois universos tenham se tocado... Talvez... você descubra a resposta."
+  "CONTEMPLE... o princípio de tudo. Um único ponto. Minúsculo. Ardente. E dentro dele... repousa o universo inteiro.",
+  "AGORA... EXPANDA-SE! Que o espaço se estenda em todas as direções! Olhe ao seu redor... você está dentro da criação!",
+  "ESFRIE! Que as partículas se unam! Eu ordeno: que nasçam os átomos... os tijolos de tudo o que existe!",
+  "Gravidade... REÚNA as nuvens! E que se faça a luz! Contemple... a primeira estrela!",
+  "Estrelas... UNAM-SE em redemoinhos gigantes! Que nasçam as galáxias! E entre elas... a Via Láctea!",
+  "Num canto tranquilo da galáxia... QUE NASÇA O SOL! E ao seu redor... um pequeno planeta azul. A TERRA!",
+  "E você... criança das estrelas... aqui está. Feita de poeira estelar. E o universo... CONTINUA A CRESCER!",
+  "Mas... o que havia antes? Nem os maiores sábios sabem. Este mistério... É SEU PARA DESVENDAR!"
 ];
 let AC=null, master=null, soundOn=true, unlocked=false, voice=null;
 const MALE=/(male|mascul|daniel|ricardo|ant[oô]nio|felipe|thiago|f[aá]bio|duarte|cristiano|humberto|donato|j[uú]lio|nicolau|val[eé]rio|bruno|paulo|marcos|rafael|eduardo)/i;
@@ -305,8 +305,9 @@ function narrate(i){
   speechSynthesis.cancel();
   const u=new SpeechSynthesisUtterance(NARR[i]);
   if(voice) u.voice=voice; u.lang=voice?voice.lang:'pt-BR';
-  u.pitch=0.45; u.rate=0.82; u.volume=1;      // deep, slow, movie-trailer style
-  duck(true); u.onend=()=>duck(false); u.onerror=()=>duck(false);
+  u.pitch=0.0; u.rate=0.72; u.volume=1;      // as deep and slow as the voice allows
+  duck(true); u.onend=()=>{duck(false); rumble(false);}; u.onerror=()=>{duck(false); rumble(false);};
+  u.onstart=()=>rumble(true); u.onboundary=e=>{ if(e.name!=='sentence') thump(); };
   setTimeout(()=>speechSynthesis.speak(u),350);
 }
 function initAudio(){
@@ -339,6 +340,21 @@ function boom(){
   const n=AC.createBufferSource(); n.buffer=b; const nf=AC.createBiquadFilter(); nf.type='lowpass'; nf.frequency.value=700;
   const ng=AC.createGain(); ng.gain.value=0.6; n.connect(nf).connect(ng).connect(master); n.start(t);
 }
+// "voice of a god": a sub-bass bed and a thunder thump on every word
+let rumbleG=null;
+function rumble(on){
+  if(!AC) return;
+  if(!rumbleG){ rumbleG=AC.createGain(); rumbleG.gain.value=0; rumbleG.connect(master);
+    [36.7,41.2,49].forEach((f,i)=>{ const o=AC.createOscillator(); o.type='sine'; o.frequency.value=f; const pn=AC.createStereoPanner(); pn.pan.value=i-1; o.connect(pn).connect(rumbleG); o.start(); }); }
+  const t=AC.currentTime; rumbleG.gain.cancelScheduledValues(t); rumbleG.gain.setValueAtTime(rumbleG.gain.value,t);
+  rumbleG.gain.linearRampToValueAtTime(on&&soundOn?0.9:0, t+(on?0.4:1.2));
+}
+function thump(){
+  if(!AC||!soundOn) return; const t=AC.currentTime;
+  const o=AC.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(70,t); o.frequency.exponentialRampToValueAtTime(32,t+0.35);
+  const g=AC.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.55,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.5);
+  o.connect(g).connect(master); o.start(t); o.stop(t+0.55);
+}
 let boomTimer=null;
 function fx(i){ clearTimeout(boomTimer); if(i===1) boom(); if(i===7) boomTimer=setTimeout(boom,2500); }
 function unlock(){
@@ -349,7 +365,7 @@ addEventListener('pointerdown',unlock); addEventListener('keydown',unlock);
 const sndBtn=document.getElementById('snd');
 sndBtn.addEventListener('click',()=>{
   soundOn=!soundOn; sndBtn.textContent=soundOn?'🔊':'🔇';
-  if(!soundOn){ if('speechSynthesis' in window) speechSynthesis.cancel(); duck(false); }
+  if(!soundOn){ if('speechSynthesis' in window) speechSynthesis.cancel(); duck(false); rumble(false); }
   else { unlock(); duck(false); narrate(stage); }
 });
 
