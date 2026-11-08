@@ -13,6 +13,9 @@
   .row{display:flex;gap:10px;width:100%;max-width:520px}
   .btn{flex:1;font:inherit;font-weight:800;font-size:18px;padding:11px;border-radius:14px;border:0;cursor:pointer;background:#ffcf5a;color:#1a1440}
   .btn.ghost{background:#1c2150;color:#f4f1ff}
+  .btn.fly{background:#7fd3ff;flex:2}
+  .btn.sm{flex:0 0 52px;padding:11px 0}
+  #hint{line-height:1.3}
   #VRButton{position:static!important;transform:none!important;width:100%!important;max-width:520px;font:800 18px 'Baloo 2',system-ui!important;border-radius:14px!important;padding:11px!important;background:#ff7ab6!important;color:#1a1440!important;border:0!important;opacity:1!important}
   #vrslot{width:100%;display:flex;justify-content:center}
 </style>
@@ -27,7 +30,8 @@
 <div id="ui">
   <div id="vrslot"></div>
   <div class="row"><button class="btn ghost" id="prev">◀ Voltar</button><button class="btn" id="next">Próximo ▶</button></div>
-  <div id="hint">Arraste a tela para olhar em volta. No óculos: <b>gatilho</b> avança, <b>botão de apertar (grip)</b> volta.</div>
+  <div class="row"><button class="btn fly" id="go">🚀 Chegar perto</button><button class="btn ghost sm" id="zin">➕</button><button class="btn ghost sm" id="zout">➖</button><button class="btn ghost sm" id="home">⟲</button></div>
+  <div id="hint"><b>Arraste</b> para olhar · <b>roda do mouse</b>, <b>W/S</b> ou <b>↑/↓</b> para ir para frente e para trás · <b>A/D</b> para os lados · <b>Q/E</b> sobe/desce · <b>N/B</b> troca de parte.<br>No óculos: <b>gatilho</b> avança, <b>grip</b> volta, <b>analógico esquerdo</b> voa, <b>analógico direito</b> gira e sobe/desce, botão <b>A</b> chega perto.</div>
 </div>
 <script type="module">
 import * as THREE from 'three';
@@ -54,8 +58,10 @@ document.getElementById('vrslot').appendChild(VRButton.createButton(renderer));
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x03040f);
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 500);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.02, 500);
 camera.position.set(0,1.6,0);
+// the "rig" is the player: moving it moves the viewer (works in VR too)
+const rig = new THREE.Group(); rig.add(camera); scene.add(rig);
 scene.add(new THREE.AmbientLight(0xffffff,0.25));
 
 addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
@@ -64,7 +70,38 @@ addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.upd
 let yaw=0,pitch=0,drag=null;
 renderer.domElement.addEventListener('pointerdown',e=>drag={x:e.clientX,y:e.clientY});
 addEventListener('pointerup',()=>drag=null);
-addEventListener('pointermove',e=>{ if(!drag) return; yaw-=(e.clientX-drag.x)*.005; pitch-=(e.clientY-drag.y)*.005; pitch=Math.max(-1.3,Math.min(1.3,pitch)); drag={x:e.clientX,y:e.clientY}; });
+addEventListener('pointermove',e=>{ if(!drag || pinch) return; yaw-=(e.clientX-drag.x)*.005; pitch-=(e.clientY-drag.y)*.005; pitch=Math.max(-1.5,Math.min(1.5,pitch)); drag={x:e.clientX,y:e.clientY}; });
+
+// free movement: keyboard, wheel, pinch, buttons
+const keys=new Set();
+addEventListener('keydown',e=>{ keys.add(e.key.toLowerCase()); if(['arrowup','arrowdown',' '].includes(e.key.toLowerCase())) e.preventDefault(); });
+addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+const tmpDir=new THREE.Vector3(), tmpRight=new THREE.Vector3(), UP=new THREE.Vector3(0,1,0);
+function viewDir(){ camera.getWorldDirection(tmpDir); return tmpDir; }
+function moveBy(f,r,u){
+  flight=null;
+  const d=viewDir().clone(); tmpRight.crossVectors(d,UP).normalize();
+  rig.position.addScaledVector(d,f).addScaledVector(tmpRight,r).addScaledVector(UP,u);
+}
+renderer.domElement.addEventListener('wheel',e=>{ e.preventDefault(); moveBy(-e.deltaY*0.004,0,0); },{passive:false});
+let pinch=null;
+renderer.domElement.addEventListener('touchstart',e=>{ if(e.touches.length===2){ const [a,b]=e.touches; pinch=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY); } },{passive:true});
+renderer.domElement.addEventListener('touchmove',e=>{ if(e.touches.length===2 && pinch){ const [a,b]=e.touches; const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY); moveBy((d-pinch)*0.01,0,0); pinch=d; } },{passive:true});
+renderer.domElement.addEventListener('touchend',e=>{ if(e.touches.length<2) pinch=null; },{passive:true});
+let holdZ=0;
+const hold=(id,v)=>{ const b=document.getElementById(id);
+  b.addEventListener('pointerdown',e=>{e.preventDefault(); holdZ=v;}); ['pointerup','pointerleave','pointercancel'].forEach(t=>b.addEventListener(t,()=>holdZ=0)); };
+hold('zin',1); hold('zout',-1);
+
+// smooth "fly to" animation
+let flight=null;
+function flyTo(target, dist){
+  const camW=new THREE.Vector3(); camera.getWorldPosition(camW);
+  let off=camW.clone().sub(target); if(off.lengthSq()<1e-6) off.set(0,0,1);
+  const dest=target.clone().add(off.normalize().multiplyScalar(dist));
+  flight={from:rig.position.clone(), to:rig.position.clone().add(dest.sub(camW)), t:0, look:target.clone()};
+}
+function goHome(){ flight={from:rig.position.clone(), to:new THREE.Vector3(), t:0, look:null, home:true}; }
 
 // ---------- helpers ----------
 function glowTex(inner='rgba(255,250,230,1)', mid='rgba(255,200,120,.5)'){
@@ -91,7 +128,7 @@ const panelCanvas=document.createElement('canvas'); panelCanvas.width=1024; pane
 const panelTex=new THREE.CanvasTexture(panelCanvas);
 const panel=new THREE.Mesh(new THREE.PlaneGeometry(1.4,1.4*420/1024), new THREE.MeshBasicMaterial({map:panelTex, transparent:true, depthWrite:false}));
 panel.position.set(0,1.05,-1.5); panel.rotation.x=-0.25; panel.renderOrder=10;
-scene.add(panel);
+rig.add(panel); // the text travels with the viewer
 function wrap(g,text,x,y,maxW,lh){
   const words=text.split(' '); let line='';
   for(const w of words){ const t=line?line+' '+w:w; if(g.measureText(t).width>maxW){ g.fillText(line,x,y); y+=lh; line=w; } else line=t; }
@@ -218,9 +255,31 @@ for(let i=0;i<2;i++){
   const ctrl=renderer.xr.getController(i);
   ctrl.addEventListener('selectstart',()=>go(stage+1));
   ctrl.addEventListener('squeezestart',()=>go(Math.max(0,stage-1)));
-  scene.add(ctrl);
+  rig.add(ctrl);
 }
-addEventListener('keydown',e=>{ if(e.key==='ArrowRight'||e.key===' ') go(stage+1); if(e.key==='ArrowLeft') go(stage-1); });
+addEventListener('keydown',e=>{ const k=e.key.toLowerCase();
+  if(k==='n'||k==='enter'||k==='pagedown') go(stage+1);
+  if(k==='b'||k==='pageup') go(Math.max(0,stage-1));
+  if(k==='f') flyToFocus();
+  if(k==='h') goHome(); });
+
+// what "Chegar perto" flies to in each part, and how close
+function focusOf(s){
+  const v=new THREE.Vector3();
+  switch(s){
+    case 2: atoms.children[0].getWorldPosition(v); return [v,0.7];
+    case 4: galaxies.children[0].getWorldPosition(v); return [v,7];
+    case 5: return [sunMesh.getWorldPosition(v),1.2];
+    case 6: return [earth.getWorldPosition(v),0.7];
+    case 7: return [ORIGIN.clone(),3.5];
+    case 1: return [ORIGIN.clone(),3];
+    default: return [ORIGIN.clone(),1.2];
+  }
+}
+function flyToFocus(){ const [p,d]=focusOf(stage); flyTo(p,d); }
+document.getElementById('go').onclick=flyToFocus;
+document.getElementById('home').onclick=goHome;
+let snapCD=0, aWas=false;
 
 const ease=x=>1-Math.pow(1-Math.min(Math.max(x,0),1),3);
 const hot=new THREE.Color(0xfff2c0), warm=new THREE.Color(0xff8a3c), cool=new THREE.Color(0x8fa8ff);
@@ -231,6 +290,42 @@ function setOpacity(group,o){ group.traverse(m=>{ if(m.material){ m.material.tra
 renderer.setAnimationLoop(()=>{
   const dt=Math.min(clock.getDelta(),0.05); stageT+=dt; const t=clock.elapsedTime;
   if(!renderer.xr.isPresenting){ camera.rotation.set(pitch,yaw,0,'YXZ'); }
+
+  // ---- free movement ----
+  const sp=(keys.has('shift')?6:2.5)*dt;
+  let f=0,r=0,u=0;
+  if(keys.has('w')||keys.has('arrowup')) f+=sp;
+  if(keys.has('s')||keys.has('arrowdown')) f-=sp;
+  if(keys.has('d')||keys.has('arrowright')) r+=sp;
+  if(keys.has('a')||keys.has('arrowleft')) r-=sp;
+  if(keys.has('e')||keys.has(' ')) u+=sp;
+  if(keys.has('q')) u-=sp;
+  f+=holdZ*2.5*dt;
+  // VR thumbsticks
+  const ses=renderer.xr.getSession();
+  if(ses){ snapCD-=dt;
+    for(const src of ses.inputSources){ const gp=src.gamepad; if(!gp) continue;
+      const ax=gp.axes.length>=4?[gp.axes[2],gp.axes[3]]:[gp.axes[0]||0,gp.axes[1]||0];
+      const dz=v=>Math.abs(v)<0.15?0:v;
+      if(src.handedness==='left'){ f+=-dz(ax[1])*3*dt; r+=dz(ax[0])*3*dt; }
+      if(src.handedness==='right'){
+        u+=-dz(ax[1])*2*dt;
+        if(Math.abs(ax[0])>0.7 && snapCD<=0){ // snap turn around the head
+          const head=new THREE.Vector3(); camera.getWorldPosition(head);
+          const ang=-Math.sign(ax[0])*Math.PI/6;
+          rig.position.sub(head).applyAxisAngle(UP,ang).add(head); rig.rotation.y+=ang; snapCD=0.35; }
+        const aNow=!!(gp.buttons[4]&&gp.buttons[4].pressed); if(aNow&&!aWas) flyToFocus(); aWas=aNow;
+      } } }
+  if(f||r||u) moveBy(f,r,u);
+  if(flight){ flight.t=Math.min(1,flight.t+dt/1.6); const k=ease(flight.t);
+    rig.position.lerpVectors(flight.from,flight.to,k);
+    if(!renderer.xr.isPresenting){
+      if(flight.look){ const c=new THREE.Vector3(); camera.getWorldPosition(c); const v=flight.look.clone().sub(c);
+        const ty=Math.atan2(-v.x,-v.z), tp=Math.atan2(v.y,Math.hypot(v.x,v.z));
+        let dy=((ty-yaw+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI; yaw+=dy*Math.min(1,dt*5); pitch+=(tp-pitch)*Math.min(1,dt*5); }
+      if(flight.home){ yaw*=1-Math.min(1,dt*5); pitch*=1-Math.min(1,dt*5); }
+    }
+    if(flight.t>=1) flight=null; }
 
   // seed point
   const fs=fade(seed,stage===0,dt,2); seed.scale.setScalar((0.4+0.15*Math.sin(t*6))*fs+0.001); seed.material.opacity=fs;
